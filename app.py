@@ -3,6 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 from datetime import datetime, timedelta
+import yfinance as yf
 
 # Page Configuration
 st.set_page_config(
@@ -25,6 +26,33 @@ st.markdown("""
             color: #1f77b4;
             font-weight: bold;
         }
+        /* Fix calendar popup visibility */
+        [role="dialog"] {
+            z-index: 9999 !important;
+            position: fixed !important;
+        }
+        /* Ensure sidebar doesn't clip calendar */
+        [data-testid="stSidebar"] {
+            overflow: visible !important;
+        }
+        /* Calendar and date picker fixes */
+        .stDateInput {
+            z-index: 1000 !important;
+        }
+        [data-baseweb="input"] {
+            z-index: 1000 !important;
+        }
+        /* Popover positioning */
+        [data-baseweb="popover"] {
+            z-index: 9999 !important;
+        }
+        /* Modal and dialog fixes */
+        div[class*="baseweb"] {
+            z-index: inherit;
+        }
+        [class*="calendar"] {
+            z-index: 9999 !important;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -40,60 +68,121 @@ st.markdown("---")
 # ============ SIDEBAR - CONTROLS ============
 st.sidebar.header("🎛️ Dashboard Controls")
 
-# Read CSV correctly
-df = pd.read_csv("dataset/stock_data.csv", skiprows=2)
+# Stock Selection with ticker mapping
+stock_options = {
+    "Apple (AAPL)": "AAPL",
+    "Google (GOOGL)": "GOOGL",
+    "Microsoft (MSFT)": "MSFT"
+}
 
-# Rename columns
-df.columns = ['Date', 'Close', 'High', 'Low', 'Open', 'Volume']
-
-# Convert Close column to numeric
-df['Close'] = pd.to_numeric(df['Close'])
-df['High'] = pd.to_numeric(df['High'])
-df['Low'] = pd.to_numeric(df['Low'])
-df['Open'] = pd.to_numeric(df['Open'])
-df['Volume'] = pd.to_numeric(df['Volume'])
-
-# Convert Date to datetime
-df['Date'] = pd.to_datetime(df['Date'])
-df = df.sort_values('Date').reset_index(drop=True)
-
-# Stock Selection
 stock_name = st.sidebar.selectbox(
     "📊 Select Stock",
-    ["Apple (AAPL)", "Google (GOOGL)", "Microsoft (MSFT)"],
+    list(stock_options.keys()),
     help="Choose a stock to analyze"
 )
 
-# Date Range Filter
-st.sidebar.subheader("📅 Date Range")
-col1_sidebar, col2_sidebar = st.sidebar.columns(2)
+stock_ticker = stock_options[stock_name]
 
-with col1_sidebar:
+# Load data based on stock selection
+@st.cache_data
+def load_stock_data(ticker):
+    try:
+        # Try to load from CSV if it's AAPL
+        if ticker == "AAPL":
+            try:
+                df = pd.read_csv("dataset/stock_data.csv", skiprows=2)
+                df.columns = ['Date', 'Close', 'High', 'Low', 'Open', 'Volume']
+                df['Date'] = pd.to_datetime(df['Date'])
+            except:
+                # Fallback to yfinance
+                df = yf.download(ticker, period="2y", progress=False)
+                df = df.reset_index()
+                df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']].copy()
+        else:
+            # For other stocks, download from yfinance
+            df = yf.download(ticker, period="2y", progress=False)
+            
+            if df.empty:
+                st.error(f"No data available for {ticker}")
+                return None
+            
+            # Reset index to make Date a column
+            df = df.reset_index()
+            
+            # Ensure Date is a datetime
+            if 'Date' in df.columns:
+                df['Date'] = pd.to_datetime(df['Date'])
+            
+            # Select only the columns we need
+            df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']].copy()
+        
+        # Ensure Date column is datetime
+        df['Date'] = pd.to_datetime(df['Date'])
+        
+        # Convert price columns to numeric, handling any errors
+        df['Close'] = pd.to_numeric(df['Close'], errors='coerce')
+        df['High'] = pd.to_numeric(df['High'], errors='coerce')
+        df['Low'] = pd.to_numeric(df['Low'], errors='coerce')
+        df['Open'] = pd.to_numeric(df['Open'], errors='coerce')
+        df['Volume'] = pd.to_numeric(df['Volume'], errors='coerce')
+        
+        # Drop rows with NaN values
+        df = df.dropna()
+        
+        # Sort by date
+        df = df.sort_values('Date').reset_index(drop=True)
+        
+        if len(df) == 0:
+            st.error(f"No valid data available for {ticker}")
+            return None
+            
+        return df
+    except Exception as e:
+        st.error(f"Error loading data for {ticker}: {str(e)}")
+        return None
+
+# Load the selected stock data
+df = load_stock_data(stock_ticker)
+
+if df is None or len(df) == 0:
+    st.stop()
+
+# ============ MAIN CONTENT - DATE RANGE FILTER ============
+st.subheader("📅 Select Date Range")
+date_col1, date_col2, date_col3 = st.columns([2, 2, 2])
+
+with date_col1:
     start_date = st.date_input(
-        "From",
+        "From Date",
         value=df['Date'].min().date(),
         min_value=df['Date'].min().date(),
-        max_value=df['Date'].max().date()
+        max_value=df['Date'].max().date(),
+        key="start_date_main"
     )
 
-with col2_sidebar:
+with date_col2:
     end_date = st.date_input(
-        "To",
+        "To Date",
         value=df['Date'].max().date(),
         min_value=df['Date'].min().date(),
-        max_value=df['Date'].max().date()
+        max_value=df['Date'].max().date(),
+        key="end_date_main"
     )
 
-# Chart Type Selection
+st.markdown("---")
+
+# Chart Type Selection (keep in sidebar)
+st.sidebar.subheader("📉 Chart Type")
 chart_type = st.sidebar.radio(
-    "📉 Chart Type",
+    "Select chart type",
     ["Closing Price", "High-Low Range", "Open-Close Comparison", "Volume Trend"],
     help="Select the type of chart to display"
 )
 
-# Moving Average
-show_moving_avg = st.sidebar.checkbox("📈 Show 20-Day Moving Average", value=True)
-show_50_ma = st.sidebar.checkbox("📈 Show 50-Day Moving Average", value=False)
+# Moving Average (keep in sidebar)
+st.sidebar.subheader("📈 Moving Averages")
+show_moving_avg = st.sidebar.checkbox("Show 20-Day Moving Average", value=True)
+show_50_ma = st.sidebar.checkbox("Show 50-Day Moving Average", value=False)
 
 # Data Filtering
 filtered_df = df[(df['Date'] >= pd.Timestamp(start_date)) & 
