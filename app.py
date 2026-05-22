@@ -10,12 +10,21 @@ st.set_page_config(
     page_title="Stock Market Analysis",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
+    menu_items={
+        'Get Help': None,
+        'Report a bug': None,
+        'About': None,
+    }
 )
 
 # Enhanced Custom CSS for better styling
 st.markdown("""
     <style>
+        /* Hide Streamlit menu and footer */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+
         /* Main color scheme */
         :root {
             --primary-color: #1f77b4;
